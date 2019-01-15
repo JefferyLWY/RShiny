@@ -1,0 +1,372 @@
+### 1. Setup -----
+library(ggplot2)
+library(reshape2)
+library(mapdata)
+library(plotly)
+library(scales)
+library(shiny)
+
+options(stringsAsFactors = F)
+setwd("Your/Path/To/DataVisualization")
+### End -----
+
+### 2. Data Preparation -----
+df <- read.csv("dit3A31Jeffery.csv", header = T, sep = ",")
+df[df=="Not Available"] <- 0
+sapply(df,class)
+
+df$Heart.Attack.Mortality <- as.numeric(df$Heart.Attack.Mortality)
+df$Heart.Attack.Readmission <- as.numeric(df$Heart.Attack.Readmission)
+df$Heart.Failure.Mortality <- as.numeric(df$Heart.Failure.Mortality)
+df$Heart.Failure.Readmission <- as.numeric(df$Heart.Failure.Readmission)
+df$Pneumonia.Mortality <- as.numeric(df$Pneumonia.Mortality)
+df$Pneumonia.Readmission <- as.numeric(df$Pneumonia.Readmission)
+sapply(df,class)
+
+#Intro. -----
+states <- map_data("state")
+newStates <- read.csv("states.csv", header = T, sep = ",")
+finalStates <- merge(x = states, y = newStates, by = "region")
+mappingStates <- merge(x = finalStates, y = stateReadFreq, by = "Category")
+colnames(mappingStates) <- c("Category","region","long","lat","group","order","subregion","Readmissions","Freq","meanReadmission")
+cnames <- aggregate(cbind(long, lat) ~ Category, data=mappingStates, FUN=function(x)mean(range(x)))
+
+#Viz. 1 -----
+stateFreq <- as.data.frame(table(df$State))
+df$Readmissions <- df$Heart.Attack.Readmission + df$Heart.Failure.Readmission + df$Pneumonia.Readmission
+stateReadmissions <- aggregate(df$Readmissions, by=list(Category=df$State), FUN=sum)
+stateReadFreq <- cbind(stateReadmissions,stateFreq[2:2])
+stateReadFreq$meanReadmission <- stateReadFreq$x / stateReadFreq$Freq 
+
+#Viz. 2 -----
+stateHAReadmissionsAll <- aggregate(df$Heart.Attack.Readmission, by=list(Category=df$State), FUN=sum)
+stateHFReadmissionsAll <- aggregate(df$Heart.Failure.Readmission, by=list(Category=df$State), FUN=sum)
+statePReadmissionsAll <- aggregate(df$Pneumonia.Readmission, by=list(Category=df$State), FUN=sum)
+readCondAll <- cbind(stateHAReadmissionsAll,stateHFReadmissionsAll[2:2],statePReadmissionsAll[2:2])
+colnames(readCondAll) <- c("State","HA","HF","P")
+melted_readCondAll <- melt(readCondAll)
+head(melted_readCondAll)
+
+aggData <- aggregate(melted_readCondAll$value, by=list(Category=melted_readCondAll$State), FUN=sum)
+aggData <- aggData[order(-aggData$x),]
+returnStates <- function(size) {
+  return(rev(aggData[c(1:size),c(1)]))  
+}
+
+
+#Viz. 3 -----
+vec <- as.vector(head(stateReadFreq[order(-stateReadFreq$meanReadmission),][1:1],10)$Category)
+tenStates <- df[df$State %in% vec,]
+TStateFreq <- as.data.frame(table(tenStates$State))
+
+stateHAReadmissions <- aggregate(tenStates$Heart.Attack.Readmission, by=list(Category=tenStates$State), FUN=sum)
+stateHFReadmissions <- aggregate(tenStates$Heart.Failure.Readmission, by=list(Category=tenStates$State), FUN=sum)
+statePReadmissions <- aggregate(tenStates$Pneumonia.Readmission, by=list(Category=tenStates$State), FUN=sum)
+readCond <- cbind(stateHAReadmissions,stateHFReadmissions[2:2],statePReadmissions[2:2],TStateFreq[2:2])
+colnames(readCond) <- c("State","HA","HF","P","Freq")
+readCond$HA = readCond$HA/readCond$Freq
+readCond$HF = readCond$HF/readCond$Freq
+readCond$P = readCond$P/readCond$Freq
+
+row.names(readCond) <- readCond$State
+readCond <- t(readCond[2:4])
+readCond <- readCond[,c("DE", "NJ", "CT", "MD", "MA", "FL", "NC", "NY", "VA", "MI")]
+melted_readCond <- melt(readCond)
+
+#Viz. 4 -----
+Florida <- df[df[, "State"] == "FL",]
+melted_FL <- melt(Florida[c("Heart.Attack.Readmission","Heart.Failure.Readmission","Pneumonia.Readmission")])
+
+#Viz. 5 -----
+FlRates <- data.frame(condition = c("Heart.Attack","Heart.Attack","Heart.Failure","Heart.Failure","Pneumonia","Pneumonia"), 
+                      type = c("Mortality","Readmission","Mortality","Readmission","Mortality","Readmission"), 
+                      val = colSums(Florida[,6:11]))
+rownames(FlRates) <- 1:nrow(FlRates)
+
+percM <- data.frame(round(FlRates[FlRates$type == "Mortality",]$val/sum(FlRates[FlRates$type == "Mortality",]$val)*100, digits = 2))
+rownames(percM) <- c("Heart Attack","Heart Failure","Pneumonia") 
+percM <- t(percM)
+percR <- data.frame(round(FlRates[FlRates$type == "Readmission",]$val/sum(FlRates[FlRates$type == "Readmission",]$val)*100, digits = 2))
+rownames(percR) <- c("Heart Attack","Heart Failure","Pneumonia") 
+percR <- t(percR)
+percF <- rbind(percR, percM)
+rownames(percF) <- c("Readmission","Mortality")
+
+#Viz. 6 -----
+fiveCounty <- as.data.frame(table(Florida$County.Name))
+fiveCounty <- fiveCounty[fiveCounty$Freq > 9,]
+vecCount <- as.vector(fiveCounty$Var1)
+florCounty <- Florida[Florida$County.Name %in% vecCount,]
+FlMn <- df[df$State %in% c("FL","MN"),]
+
+FlMnInfo <- stateReadFreq[stateReadFreq$Category %in% c("FL","MN"),][,c(1,3,4,2)]
+colnames(FlMnInfo) <- c("State", "No. of Hospitals", "Mean Readmission", "Total Readmission")
+rownames(FlMnInfo) <- 1:nrow(FlMnInfo)
+
+### End -----
+
+### 3. User Interface -----
+ui <- fluidPage(
+  tags$head(
+    tags$style(HTML("
+      h1, h2, h3, pre, table {
+        text-align: center;
+      },
+      table {
+        margin-left:auto; 
+        margin-right:auto;
+      }
+    "))
+  ),
+  fluidRow(
+    tags$h1(tags$strong("Business Analytics "), "CA1 Dashboard")
+  ),
+  tabsetPanel(
+    tabPanel("Introduction",
+               fluidRow(
+                 tags$h3("Readmission count by States"),
+                 tags$hr()
+               ),
+               fluidRow(
+                 column(10, align="center", offset = 1, plotlyOutput("map"))
+               ),
+               tags$hr(),              
+               fluidRow(
+                 tags$h3("Number of Hospitals (States)")
+               ),
+               fluidRow(
+                 verbatimTextOutput("states")
+               )
+             ),
+    tabPanel("Visualization 1",
+               fluidRow(
+                 tags$h3(textOutput("titleOne")),
+                 tags$hr()
+               ),  
+               fluidRow(
+                 column(2,
+                        radioButtons("radio", label = h3("Switch"),
+                                     choices = list("Scatter Plot" = 1, "Histogram" = 2), 
+                                     selected = 1)
+                        ),
+                 column(10,
+                        plotlyOutput("plots1")
+                        )
+               ),
+               tags$hr()
+             ),
+    tabPanel("Visualization 2",
+               fluidRow(
+                 tags$h3("Readmission Rates for different conditions Sorted (States)"),
+                 tags$hr()
+               ),
+               fluidRow(
+                 plotlyOutput("stack2"),
+                 tags$hr()
+               ),
+               fluidRow(
+                 wellPanel(
+                   sliderInput(inputId = "noStates", label = "Select the number of States", value = 18, min = 10, max = 50) 
+                 )
+               )
+             ),
+    tabPanel("Visualization 3",
+               fluidRow(
+                 tags$h3("Highest Readmission Rates of Hospital across different Conditions (States)"),
+                 tags$hr()
+               ),
+               fluidRow(
+                 plotOutput("heat3")
+               ),
+               fluidRow(
+                 tags$hr(),
+                 tags$h3("Number of Hospitals (10 States)")
+               ),
+               fluidRow(
+                 verbatimTextOutput("states3")
+               )
+             ),
+    tabPanel("Visualization 4",
+               fluidRow(
+                 tags$h3("Hospital Readmission rates across different Conditions (Florida)"),
+                 tags$hr()
+               ),
+               fluidRow(
+                 plotlyOutput("box4"),
+                 tags$hr()
+               ),
+               fluidRow(
+                 verbatimTextOutput("summary4")
+               )
+             ),
+    tabPanel("Visualization 5",
+               fluidRow(
+                 tags$h3("Comparison of Mortaility & Readmission across different Conditions (Florida)"),
+                 tags$hr()
+               ),
+               fluidRow(
+                  plotlyOutput("bar5")
+               ),
+               tags$hr(),
+               fluidRow(
+                 column(8,
+                        plotOutput("pie5")
+                 ),
+                 column(4,
+                          radioButtons("radioPie", label = h3("Type"),
+                                     choices = list("Readmission" = 1, "Mortality" = 2), 
+                                     selected = 1),
+                          tableOutput("perc5")
+                        )
+                 
+               ),
+               tags$hr()
+             ),
+    tabPanel("Visualization 6",
+               fluidRow(
+                 tags$h3("Comparison of Readmission Rates between Florida and Minnesota"),
+                 tags$hr()
+               ),
+               fluidRow(
+                 plotlyOutput("scatter6"),
+                 tags$hr()
+               ),
+               fluidRow(
+                 column(12, align="center", tableOutput("info6"))
+               )
+             )
+    
+  )
+  
+)
+### End -----
+
+### 4. Server Logic -----
+server <- function(input, output) {
+  vizTitle <- reactiveValues(data = "Readmission against No. of Hospital (States)")
+  
+  #Intro
+  output$map <- renderPlotly({
+    pltMap <- ggplot(data = mappingStates, mapping = aes(x = long, y = lat)) + 
+      geom_polygon(aes(group = group, fill = Readmissions), color = "white") +
+      geom_text(data=cnames, aes(long, lat, label = Category), size=2, color = "white") +
+      theme(legend.position = "right")
+    ggplotly(pltMap)
+  })
+  output$states <- renderPrint({
+    table(df$State)
+  })
+  
+  #Viz. 1
+  output$plots1 <- renderPlotly({
+    if (input$radio == 1){
+      vizTitle$data <- "Readmission against No. of Hospital (States)"
+      pltScatter <- ggplot(stateReadFreq, aes(x=Freq, y=x)) + 
+        geom_point(size=2, shape=21, color="steelblue", fill="lightblue", alpha = 9/10) + 
+        geom_smooth(method=lm, color="red") + 
+        labs(x = "Hospital count", y="Readmission rates")
+      ggplotly(pltScatter)
+    } else {
+      vizTitle$data <- "Mean Readmission of Hospital (States)"
+      pltHist <- ggplot(data=stateReadFreq, aes(stateReadFreq$meanReadmission)) + 
+        geom_histogram(binwidth = 100, color="steelblue", fill="lightblue") + 
+        labs(x = "Mean readmission rate", y="Frequency of state") +
+        scale_y_continuous(breaks = seq(0, 20, by = 1)) + 
+        scale_x_continuous(breaks = seq(0, 2000, by = 100))
+      ggplotly(pltHist)
+    }
+  })
+  output$titleOne <- renderText({
+    paste(vizTitle$data)
+  })
+  
+  #Viz. 2
+  output$stack2 <- renderPlotly({
+    pltStack <- ggplot(data = melted_readCondAll, aes(x = State, y = value, fill = variable, label = value)) + 
+      geom_bar(stat = "identity") +
+      xlim(returnStates(input$noStates)) +
+      geom_text(size = 3, position = position_stack(vjust = 0.5), color="White") +
+      scale_fill_manual(values = c("lightblue","skyblue","steelblue")) +
+      labs(x = "States", y = "Count") +
+      coord_flip()
+    ggplotly(pltStack)
+  })
+  
+  #Viz. 3
+  output$heat3 <- renderPlot({
+    ggplot(melted_readCond, aes(Var2, Var1)) + 
+      geom_tile(aes(fill = value), colour = "white") + 
+      geom_text(aes(label = round(value, 1)), colour = "white") + 
+      scale_fill_gradient(low = "lightblue", high = "steelblue") + 
+      labs(x = "Top 10 States with the Highest Readmission Rates", y="Health Conditions")
+  })
+  output$states3 <- renderPrint({
+    table(df[df$State %in% vec,]$State)
+  })
+  
+  #Viz. 4
+  output$box4 <- renderPlotly({
+    pltBox <- ggplot(melted_FL, aes(x=variable, y=value, color=variable)) + 
+      geom_boxplot(notch=TRUE, outlier.colour = NULL) + 
+      scale_color_manual(values = c("lightblue","skyblue","steelblue")) +
+      scale_y_continuous(breaks = seq(0, 4000, by = 500)) +
+      scale_x_discrete(labels=c("Heart.Attack.Readmission" = "Heart Attack", 
+                                "Heart.Failure.Readmission" = "Heart Failure",
+                                "Pneumonia.Readmission" = "Pneumonia")) +
+      labs(x = "Health Conditions", y="No. of Readmissions")
+    ggplotly(pltBox)
+  })
+  output$summary4 <- renderPrint({
+    summary(Florida[,c(7,9,11)])
+  })
+  
+  #Viz. 5
+  output$bar5 <- renderPlotly({
+    pltBar <- ggplot(FlRates, aes(condition, val)) + 
+      geom_bar(aes(fill = type), width = 0.4, position = position_dodge(width=0.5), stat="identity") + 
+      scale_fill_manual(values = c("lightblue","steelblue")) +
+      scale_y_continuous(breaks = seq(0, 100000, by = 5000)) +
+      labs(x = "Health Condition", y = "Count") + 
+      theme(legend.position = "top")
+    ggplotly(pltBar)
+  })
+  output$pie5 <- renderPlot({
+    if (input$radioPie == 1){
+      ggplot(FlRates[FlRates$type == "Readmission",], aes(x="", y=val, fill=condition)) +
+        geom_bar(width = 1, stat = "identity") +
+        coord_polar("y", start=0) +
+        scale_fill_manual(values=c("lightblue","skyblue","steelblue")) +
+        theme(legend.position = "bottom") +
+        labs(x = "", y="") +
+        theme_minimal()
+    } else {
+      ggplot(FlRates[FlRates$type == "Mortality",], aes(x="", y=val, fill=condition)) +
+        geom_bar(width = 1, stat = "identity") +
+        coord_polar("y", start=0) +
+        scale_fill_manual(values=c("lightblue","skyblue","steelblue")) +
+        labs(x = "", y="") +
+        theme_minimal()
+    }
+    
+  })
+  output$perc5 <- renderTable(percF)
+  
+  #Viz. 6
+  output$scatter6 <- renderPlotly({
+    plot_ly(x = FlMn$Heart.Attack.Readmission, 
+            y = FlMn$Heart.Failure.Readmission, 
+            z = FlMn$Pneumonia.Readmission, 
+            color = FlMn$State,
+            colors = c("steelblue","lightblue")) %>% 
+      add_markers(opacity=0.6) %>%
+      layout(scene = list(xaxis = list(title = 'Heart Attack'),
+                          yaxis = list(title = 'Heart Failure'),
+                          zaxis = list(title = 'Pneumonia')))
+  }) 
+  output$info6 <- renderTable(FlMnInfo)
+}
+### End -----
+
+### 5. Application -----
+shinyApp(ui = ui, server = server)
+### End -----
